@@ -32,6 +32,13 @@ interface GameState {
     width: number;
     height: number;
   };
+  star: {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+    speed: number;
+  };
   score: number;
   lives: number;
   gameStatus: 'start' | 'playing' | 'gameOver';
@@ -42,9 +49,13 @@ const CANVAS_WIDTH = 800;
 const CANVAS_HEIGHT = 600;
 const YAR_SIZE = 16;
 const QOTILE_SIZE = 24;
-const BARRIER_COLS = 40;
-const BARRIER_ROWS = 20;
+const BARRIER_WIDTH = 8;
+const BARRIER_HEIGHT = CANVAS_HEIGHT;
+const BARRIER_X = 300;
+const BARRIER_COLS = 20;
+const BARRIER_ROWS = Math.floor(CANVAS_HEIGHT / 8);
 const NEUTRAL_ZONE_X = 600;
+const NEUTRAL_ZONE_WIDTH = CANVAS_WIDTH - NEUTRAL_ZONE_X;
 
 export default function YarsRevenge() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -58,7 +69,7 @@ export default function YarsRevenge() {
       height: YAR_SIZE,
     },
     qotile: {
-      x: CANVAS_WIDTH - 100,
+      x: NEUTRAL_ZONE_X + 50,
       y: CANVAS_HEIGHT / 2,
       width: QOTILE_SIZE,
       height: QOTILE_SIZE,
@@ -75,20 +86,27 @@ export default function YarsRevenge() {
       width: 8,
       height: 8,
     },
+    star: {
+      x: CANVAS_WIDTH - 50,
+      y: CANVAS_HEIGHT / 2,
+      width: 12,
+      height: 12,
+      speed: 2,
+    },
     score: 0,
     lives: 3,
     gameStatus: 'start',
     keys: {},
   });
 
-  // Initialize barrier with some gaps
+  // Initialize barrier with some gaps - vertical barrier
   const initializeBarrier = useCallback(() => {
     const barrier = Array(BARRIER_ROWS).fill(null).map(() => Array(BARRIER_COLS).fill(true));
     
-    // Create some initial gaps in the barrier
+    // Create some initial gaps in the vertical barrier
     for (let i = 0; i < BARRIER_ROWS; i++) {
       for (let j = 0; j < BARRIER_COLS; j++) {
-        if (Math.random() < 0.1) {
+        if (Math.random() < 0.15) {
           barrier[i][j] = false;
         }
       }
@@ -122,7 +140,7 @@ export default function YarsRevenge() {
             height: YAR_SIZE,
           },
           qotile: {
-            x: CANVAS_WIDTH - 100,
+            x: NEUTRAL_ZONE_X + 50,
             y: CANVAS_HEIGHT / 2,
             width: QOTILE_SIZE,
             height: QOTILE_SIZE,
@@ -137,6 +155,13 @@ export default function YarsRevenge() {
             active: false,
             width: 8,
             height: 8,
+          },
+          star: {
+            x: CANVAS_WIDTH - 50,
+            y: CANVAS_HEIGHT / 2,
+            width: 12,
+            height: 12,
+            speed: 2,
           },
         }));
         return;
@@ -210,8 +235,8 @@ export default function YarsRevenge() {
           }
 
           // Check collision with barrier
-          const barrierX = Math.floor((shot.x - 200) / 10);
-          const barrierY = Math.floor(shot.y / 20);
+          const barrierX = Math.floor((shot.x - BARRIER_X) / (BARRIER_WIDTH + 2));
+          const barrierY = Math.floor(shot.y / 8);
           
           if (barrierX >= 0 && barrierX < BARRIER_COLS && barrierY >= 0 && barrierY < BARRIER_ROWS) {
             if (newState.barrier[barrierY][barrierX]) {
@@ -236,13 +261,41 @@ export default function YarsRevenge() {
         });
 
         // Yar eating barrier
-        const yarBarrierX = Math.floor((newState.yar.x - 200) / 10);
-        const yarBarrierY = Math.floor(newState.yar.y / 20);
+        const yarBarrierX = Math.floor((newState.yar.x - BARRIER_X) / (BARRIER_WIDTH + 2));
+        const yarBarrierY = Math.floor(newState.yar.y / 8);
         
         if (yarBarrierX >= 0 && yarBarrierX < BARRIER_COLS && yarBarrierY >= 0 && yarBarrierY < BARRIER_ROWS) {
           if (newState.barrier[yarBarrierY][yarBarrierX]) {
             newState.barrier[yarBarrierY][yarBarrierX] = false;
             newState.score += 2;
+          }
+        }
+
+        // Update star - chase the player
+        const dx = newState.yar.x - newState.star.x;
+        const dy = newState.yar.y - newState.star.y;
+        const distance = Math.sqrt(dx * dx + dy * dy);
+        
+        if (distance > 0) {
+          newState.star.x += (dx / distance) * newState.star.speed;
+          newState.star.y += (dy / distance) * newState.star.speed;
+        }
+
+        // Check collision between star and Yar
+        if (newState.star.x < newState.yar.x + newState.yar.width &&
+            newState.star.x + newState.star.width > newState.yar.x &&
+            newState.star.y < newState.yar.y + newState.yar.height &&
+            newState.star.y + newState.star.height > newState.yar.y) {
+          newState.lives--;
+          
+          if (newState.lives <= 0) {
+            newState.gameStatus = 'gameOver';
+          } else {
+            // Reset Yar and star positions
+            newState.yar.x = 100;
+            newState.yar.y = CANVAS_HEIGHT / 2;
+            newState.star.x = CANVAS_WIDTH - 50;
+            newState.star.y = CANVAS_HEIGHT / 2;
           }
         }
 
@@ -296,7 +349,7 @@ export default function YarsRevenge() {
               qotile: {
                 ...current.qotile,
                 destroyed: false,
-                x: CANVAS_WIDTH - 100,
+                x: NEUTRAL_ZONE_X + 50,
                 y: Math.random() * (CANVAS_HEIGHT - QOTILE_SIZE),
               },
               barrier: initializeBarrier(),
@@ -359,16 +412,20 @@ export default function YarsRevenge() {
       return;
     }
 
-    // Draw neutral zone
-    ctx.fillStyle = '#333333';
-    ctx.fillRect(NEUTRAL_ZONE_X, 0, CANVAS_WIDTH - NEUTRAL_ZONE_X, CANVAS_HEIGHT);
+    // Draw neutral zone (safe area on the right)
+    ctx.fillStyle = '#1a1a2e';
+    ctx.fillRect(NEUTRAL_ZONE_X, 0, NEUTRAL_ZONE_WIDTH, CANVAS_HEIGHT);
+    
+    // Draw neutral zone border
+    ctx.fillStyle = '#16213e';
+    ctx.fillRect(NEUTRAL_ZONE_X - 2, 0, 2, CANVAS_HEIGHT);
 
-    // Draw barrier
+    // Draw vertical barrier
     ctx.fillStyle = '#FF6600';
     for (let i = 0; i < BARRIER_ROWS; i++) {
       for (let j = 0; j < BARRIER_COLS; j++) {
         if (gameState.barrier[i][j]) {
-          ctx.fillRect(200 + j * 10, i * 20, 8, 18);
+          ctx.fillRect(BARRIER_X + j * (BARRIER_WIDTH + 2), i * 8, BARRIER_WIDTH, 6);
         }
       }
     }
@@ -394,6 +451,26 @@ export default function YarsRevenge() {
       ctx.fillStyle = '#FF0000';
       ctx.fillRect(gameState.destroyer.x, gameState.destroyer.y, gameState.destroyer.width, gameState.destroyer.height);
     }
+
+    // Draw star (chasing enemy)
+    ctx.fillStyle = '#FFFF00';
+    ctx.save();
+    ctx.translate(gameState.star.x + gameState.star.width / 2, gameState.star.y + gameState.star.height / 2);
+    ctx.rotate(Date.now() * 0.01);
+    
+    // Draw star shape
+    ctx.beginPath();
+    const starSize = gameState.star.width / 2;
+    for (let i = 0; i < 5; i++) {
+      const angle = (i * 4 * Math.PI) / 5;
+      const x = Math.cos(angle) * starSize;
+      const y = Math.sin(angle) * starSize;
+      if (i === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    }
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
 
     // Draw UI
     ctx.fillStyle = '#00FF00';
@@ -424,8 +501,9 @@ export default function YarsRevenge() {
       />
       
       <div className="mt-4 text-center text-green-400 font-orbitron text-sm">
-        <p>Navigate through the barrier and destroy the Qotile!</p>
-        <p>Avoid the deadly Destroyer missile!</p>
+        <p>Navigate through the vertical barrier and destroy the Qotile!</p>
+        <p>Avoid the deadly Destroyer missile and the chasing Star!</p>
+        <p>Use the Neutral Zone (right side) for safety!</p>
       </div>
     </div>
   );
